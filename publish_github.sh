@@ -63,14 +63,15 @@ echo
 if [[ "$dry_run" -eq 1 ]]; then
     echo "would run:"
     echo "  git init -b main"
-    echo "  git add -A && git commit -m 'GSQ ROCm port'"
+    echo "  git add -A && git commit -m '<initial commit>'"
     if gh repo view "$repo_id" >/dev/null 2>&1; then
-        echo "  git remote add origin https://github.com/$repo_id.git   # repo exists"
-        echo "  git push -u origin main"
+        echo "  # repository already exists, nothing to create"
     else
-        echo "  gh repo create $repo_id --source . $visibility --push --description \"$DESCRIPTION\""
+        echo "  gh repo create $repo_id $visibility --description \"$DESCRIPTION\""
     fi
-    echo "  gh repo edit $repo_id --description \"$DESCRIPTION\" --add-topic $TOPICS"
+    echo "  git remote add origin https://github.com/$repo_id.git   # if origin is missing"
+    echo "  git push -u origin main"
+    echo "  gh repo edit $repo_id --description \"...\" --add-topic $TOPICS"
     exit 0
 fi
 
@@ -82,23 +83,32 @@ fi
 
 git add -A
 if ! git diff --cached --quiet; then
-    git commit -m "GSQ ROCm port: gfx1200/gfx1201 (RDNA4) and gfx115x APUs"
+    git commit -m "${NAME} ROCm port: gfx1200/gfx1201 (RDNA4) and gfx115x APUs"
+fi
+
+# Create the repository first (empty, no remote), then wire up origin and push.
+# Letting `gh repo create --source . --remote origin --push` do it fails when
+# origin already exists, which is exactly what happens on a second run.
+if gh repo view "$repo_id" >/dev/null 2>&1; then
+    echo "repository exists: https://github.com/$repo_id"
+else
+    echo "creating repository"
+    gh repo create "$repo_id" "$visibility" --description "$DESCRIPTION"
 fi
 
 if git remote get-url origin >/dev/null 2>&1; then
     echo "using existing origin: $(git remote get-url origin)"
+    if [[ "$(git remote get-url origin)" != *"github.com/${repo_id}"* ]]; then
+        echo "warning: origin does not point at $repo_id; pushing there anyway" >&2
+    fi
 else
     git remote add origin "https://github.com/${repo_id}.git"
 fi
 
-if gh repo view "$repo_id" >/dev/null 2>&1; then
-    echo "repository exists; pushing"
-    git push -u origin main
-else
-    echo "creating repository"
-    gh repo create "$repo_id" --source . "$visibility" --remote origin \
-        --push --description "$DESCRIPTION"
-fi
+# Make sure git can authenticate over https with the gh credentials.
+gh auth setup-git >/dev/null 2>&1 || true
+
+git push -u origin main
 
 gh repo edit "$repo_id" --description "$DESCRIPTION" --add-topic "$TOPICS" >/dev/null
 
