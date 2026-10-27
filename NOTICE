@@ -1,0 +1,26 @@
+GSQ ROCm port
+=============
+
+Copyright (c) 2026 the GSQ authors (IST-DASLab) and contributors to this fork.
+
+This repository is a fork of https://github.com/IST-DASLab/GSQ
+(upstream commit 03fc16484c369e3127225615d5e03e8d3a6043e3) with AMD ROCm
+support added for gfx1200/gfx1201 (RDNA4) and gfx115x (RDNA3.5 APUs).
+
+It is distributed under the Apache License 2.0; see LICENSE. The upstream
+README, including the citation, is kept at UPSTREAM_README.md.
+
+Main changes relative to upstream:
+
+  * src/rocm_compat.py: platform detection, device normalization, ROCm
+    allocator/dist defaults, RNG replay helpers, TF32/cuDNN guards.
+  * Gumbel quantizers: device-agnostic RNG replay and bf16 softmax path.
+  * src/prior/gptq.py: fp32 Hessian with a safe Cholesky fallback
+    (rocSOLVER rejects some asymmetric fp32 matrices as non-PD).
+  * Model wrappers: SDPA attention, no flash-attn / Humming / Marlin.
+  * scripts/setup_env_rocm.sh and requirements-rocm.txt: ROCm PyTorch wheels
+    instead of the CUDA pins in pyproject.toml / uv.lock.
+  * configs/rocm/: rungs for gfx1200 and gfx115x.
+
+Nothing in this repository is model weights; runtime outputs are written to
+runtime/ (gitignored).

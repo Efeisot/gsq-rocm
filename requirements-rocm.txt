@@ -1,0 +1,30 @@
+# GSQ portable dependencies for ROCm / AMD GPUs (gfx1200, gfx1201, gfx115x).
+#
+# torch/torchvision are intentionally NOT listed here: install them from the
+# PyTorch ROCm wheel index first (scripts/setup_env_rocm.sh does this):
+#
+#   uv pip install --index-url https://download.pytorch.org/whl/rocm7.0 torch torchvision
+#
+# CUDA-only packages deliberately omitted:
+#   * flash-attn        (no ROCm/RDNA4 backend; GSQ trains with SDPA)
+#   * humming-kernels   (Marlin-derived CUDA kernels)
+#   * vllm              (install the ROCm wheel separately, see README-ROCM.md)
+#
+# Versions follow the CUDA pyproject but without hard pins that pull CUDA
+# wheels transitively.
+
+numpy
+transformers>=5.3
+accelerate
+datasets
+safetensors
+compressed-tensors>=0.15
+lion-pytorch
+wandb
+tqdm
+pyyaml
+python-dotenv
+tiktoken
+lm-eval[api]
+lighteval
+matplotlib

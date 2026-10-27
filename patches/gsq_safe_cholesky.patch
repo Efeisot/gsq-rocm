@@ -1,0 +1,42 @@
+--- a/src/prior/gptq.py
++++ b/src/prior/gptq.py
+@@ -13,6 +13,21 @@
+ DEBUG = False 
+ 
+ 
++def _safe_cholesky(X, upper=False):
++    """Cholesky for a symmetric matrix with a ROCm-safe fallback.
++
++    ``X^T X`` is symmetric analytically, but fp32 GEMM on gfx1200 leaves a
++    small asymmetry that rocSOLVER can reject as non-PD.  Symmetrize first and
++    retry in fp64 if the fp32 factorization still fails.
++    """
++    X = (X + X.transpose(-1, -2)) * 0.5
++    try:
++        return torch.linalg.cholesky(X, upper=upper)
++    except torch._C._LinAlgError:
++        factor = torch.linalg.cholesky(X.double(), upper=upper)
++        return factor.to(X.dtype)
++
++
+ def rtn_quantize(layer, config, device, dtype):
+     W = layer.weight.data.clone().float()
+     rows, columns = W.shape
+@@ -84,7 +99,7 @@
+         damp = percdamp * torch.mean(torch.diag(self.H))
+         diag = torch.arange(self.columns, device=self.dev)
+         self.H[diag, diag] += damp
+-        self.H = torch.linalg.cholesky(self.H)
++        self.H = _safe_cholesky(self.H)
+         self.H = self.H.to(self.dtype)
+ 
+     def sync_H(self, world_size):
+@@ -140,7 +155,7 @@
+             Q = torch.zeros_like(W)
+ 
+             H = torch.cholesky_inverse(self.H.float())
+-            H = torch.linalg.cholesky(H, upper=True)
++            H = _safe_cholesky(H, upper=True)
+             Hinv = H
+ 
+             for i1 in range(0, self.columns, blocksize):

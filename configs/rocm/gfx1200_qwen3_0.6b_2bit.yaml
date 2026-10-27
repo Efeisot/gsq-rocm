@@ -1,0 +1,68 @@
+# GSQ smoke-test configuration for an AMD gfx1200 workstation (16 GB class GPU).
+#
+# Target: Qwen3-0.6B, 2-bit Gumbel-Softmax refinement.
+# This is intentionally small: it exercises the whole pipeline (GPTQ init,
+# Gumbel training, checkpoint writing, reassembly) without needing >16 GiB.
+#
+#   bash scripts/run.sh --config configs/rocm/gfx1200_qwen3_0.6b_2bit.yaml
+#   # or a 2-layer quick check:
+#   python main.py --config configs/rocm/gfx1200_qwen3_0.6b_2bit.yaml --max-layers 2
+
+model:
+  name: "Qwen/Qwen3-0.6B"
+  device: "cuda"          # ROCm exposes GPUs through PyTorch's "cuda" namespace
+  dtype: "bfloat16"
+
+data:
+  dataset_name: "c4"
+  batch_size: 8
+  num_samples: 256
+  val_samples: 32
+  max_length: 1024
+  num_workers: 2
+  open_thoughts_max_samples: 1000
+
+quantization:
+  gsq_bits: 2
+  init_method: "gptq"
+  gsq_enabled: true
+  start_layer: 0
+  self_attn: false
+  std: 0.01
+  temperature: [2.0, 0.05]
+  scale: [100, 500]
+  groupsize: 128
+  strength: 6
+  logits_dtype: "bfloat16"
+
+training:
+  num_epochs: 2
+  device_microbatch_size: 1
+  lr1: 0.0001
+  lr2: 0.00005
+  weight_decay: 1.0
+  checkpoint_dir: "runtime/checkpoints"
+  log_dir: "runtime/logs"
+  eval_baseline: false
+  ppl_eval_every_n_layers: 0   # set >0 to enable WikiText2 PPL during the run
+  act_cache_dir: "runtime/act_cache"
+
+gptq:
+  nsamples: 128
+  wbits: 2
+  sym: true
+  percdamp: 0.1
+  blocksize: 128
+  groupsize: 128
+
+distributed:
+  timeout_hours: 1.0
+
+wandb: false
+
+logging:
+  gumbel_step_log_interval: 50
+  step_report_divisor: 5
+  calib_report_divisor: 10
+  ppl_report_divisor: 10
+  batch_report_divisor: 5

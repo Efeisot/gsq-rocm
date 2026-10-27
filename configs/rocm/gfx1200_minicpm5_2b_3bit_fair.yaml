@@ -1,0 +1,75 @@
+# GSQ fair comparison run: MiniCPM5-2B, gfx1200 (RX 9060 XT), 3-bit, 2 layers.
+#
+# The porting notes asked for a fair GSQ test that the CPU-only machine never
+# ran: 3-bit, 2 transformer layers, 4 epochs, recording the initial and final
+# val-hard MSE. Use with:
+#
+#   python main.py --config configs/rocm/gfx1200_minicpm5_2b_3bit_fair.yaml --max-layers 2
+#
+# Same calibration corpus and hyperparameters as the 1-layer smoke config;
+# only the epoch count and the output directories differ, so results are
+# directly comparable with runtime/minicpm5_gpu_3bit.
+
+model:
+  name: "../MiniCPM5-2B"
+  device: "cuda"              # ROCm still uses the "cuda" namespace; GSQ_DEVICE overrides
+  dtype: "bfloat16"
+
+data:
+  dataset_name: "local_text"
+  local_text_path: "../MiniCPM5-2B/README.md"
+  batch_size: 1
+  num_samples: 4
+  val_samples: 2
+  max_length: 128
+  num_workers: 0
+  seed: 0
+  shuffle_seed: 1234
+  open_thoughts_max_samples: 32
+
+quantization:
+  gsq_bits: 3
+  init_method: "gptq"
+  gsq_enabled: true
+  start_layer: 0
+  self_attn: false
+  std: 0.01
+  temperature: [2.0, 0.05]
+  scale: [100, 500]
+  groupsize: 128
+  strength: 6
+  logits_dtype: "bfloat16"
+
+training:
+  num_epochs: 4
+  device_microbatch_size: 1
+  lr1: 0.0001
+  lr2: 0.00005
+  weight_decay: 1.0
+  checkpoint_dir: "runtime/minicpm5_gpu_3bit_fair/checkpoints"
+  log_dir: "runtime/minicpm5_gpu_3bit_fair/logs"
+  eval_baseline: false
+  ppl_eval_every_n_layers: 0     # PPL eval uses pin_memory(); keep disabled
+  act_cache_dir: "runtime/minicpm5_gpu_3bit_fair/act_cache"
+  act_cache_mmap_threshold_gb: 2.0
+  meta_init_std: 0.02
+
+gptq:
+  nsamples: 4
+  wbits: 3
+  sym: true
+  percdamp: 0.1
+  blocksize: 128
+  groupsize: 128
+
+distributed:
+  timeout_hours: 1.0
+
+wandb: false
+
+logging:
+  gumbel_step_log_interval: 1
+  step_report_divisor: 1
+  calib_report_divisor: 1
+  ppl_report_divisor: 1
+  batch_report_divisor: 1

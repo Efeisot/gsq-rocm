@@ -1,0 +1,78 @@
+# GSQ smoke-test configuration: MiniCPM5-2B on a gfx1152 (RDNA3.5 APU)
+# or on CPU for port validation.
+#
+# MiniCPM5-2B is a plain LlamaForCausalLM (42 layers, hidden 2048), so the
+# LLaMA wrapper is used. The corpus is the model card README, which means no
+# HuggingFace dataset download is needed.
+#
+#   # CPU (what the port was validated with):
+#   GSQ_DEVICE=cpu python main.py --config configs/rocm/gfx1152_minicpm5_2b_2bit.yaml --max-layers 1
+#
+#   # gfx1152 APU:
+#   python main.py --config configs/rocm/gfx1152_minicpm5_2b_2bit.yaml --max-layers 1
+#
+# This is a 1-layer smoke test, not a production quantization run.
+
+model:
+  name: "../MiniCPM5-2B"
+  device: "cuda"              # ROCm still uses the "cuda" namespace; GSQ_DEVICE overrides
+  dtype: "bfloat16"
+
+data:
+  dataset_name: "local_text"
+  local_text_path: "../MiniCPM5-2B/README.md"
+  batch_size: 1
+  num_samples: 4
+  val_samples: 2
+  max_length: 128
+  num_workers: 0
+  seed: 0
+  shuffle_seed: 1234
+  open_thoughts_max_samples: 32
+
+quantization:
+  gsq_bits: 2
+  init_method: "gptq"
+  gsq_enabled: true
+  start_layer: 0
+  self_attn: false
+  std: 0.01
+  temperature: [2.0, 0.05]
+  scale: [100, 500]
+  groupsize: 128
+  strength: 6
+  logits_dtype: "bfloat16"
+
+training:
+  num_epochs: 1
+  device_microbatch_size: 1
+  lr1: 0.0001
+  lr2: 0.00005
+  weight_decay: 1.0
+  checkpoint_dir: "runtime/minicpm5_cpu/checkpoints"
+  log_dir: "runtime/minicpm5_cpu/logs"
+  eval_baseline: false
+  ppl_eval_every_n_layers: 0     # PPL eval uses pin_memory(); disabled for CPU runs
+  act_cache_dir: "runtime/minicpm5_cpu/act_cache"
+  act_cache_mmap_threshold_gb: 2.0
+  meta_init_std: 0.02
+
+gptq:
+  nsamples: 4
+  wbits: 2
+  sym: true
+  percdamp: 0.1
+  blocksize: 128
+  groupsize: 128
+
+distributed:
+  timeout_hours: 1.0
+
+wandb: false
+
+logging:
+  gumbel_step_log_interval: 1
+  step_report_divisor: 1
+  calib_report_divisor: 1
+  ppl_report_divisor: 1
+  batch_report_divisor: 1

@@ -1,0 +1,86 @@
+--- a/src/models/base.py	2026-10-22 10:39:52.415346615 +0300
++++ b/src/models/base.py	2026-10-22 16:05:09.987238977 +0300
+@@ -357,6 +357,16 @@
+             logging = logging.logger
+         current_layer = self.get_layer_module(self.current_layer_idx)
+         self.groupsize = config.quantization.groupsize
++        # The packing scheme must match the width the Gumbel quantizer actually
++        # produced.  This used to be hard-coded to 4 bits, so 2/3-bit runs were
++        # written as 4-bit containers (larger files, and the stored metadata
++        # disagreed with the values).  Mixed/ternary modes have no single
++        # integer width here; leave the 4-bit default for those.
++        qbits = config.quantization.gsq_bits
++        if isinstance(qbits, int) and 1 <= qbits <= 8:
++            self.quant_bits = qbits
++        else:
++            self.quant_bits = None
+         subset = {}
+         
+         if is_attn:
+@@ -545,6 +555,8 @@
+         # is now state-dict / scheme based (compress(state_dict, scheme)) instead of
+         # the old per-tensor compress_weight(weight=, scale=, quantization_args=).
+         self.quantization_config.config_groups.group_0.weights.group_size = self.groupsize
++        if getattr(self, "quant_bits", None) is not None:
++            self.quantization_config.config_groups.group_0.weights.num_bits = self.quant_bits
+         scheme = self.quantization_config.config_groups.group_0
+         return self.compressor.compress(
+             {"weight": weight, "weight_scale": scale},
+@@ -630,6 +642,21 @@
+                     continue
+                 if name.endswith(".weight_packed"):
+                     base = name[: -len(".weight_packed")]
++                    # The on-disk shard does not carry the bit width in its
++                    # tensor names.  Recover it from the packed column count
++                    # (and the group size from the scale shape) so a fresh
++                    # process can load 2/3-bit shards, not only 4-bit ones.
++                    shape = tensors[f"{base}.weight_shape"].tolist()
++                    cols = int(shape[1])
++                    packed_cols = int(tensors[f"{base}.weight_packed"].shape[1])
++                    for bits, per_word in ((8, 4), (4, 8), (3, 10), (2, 16), (1, 32)):
++                        if packed_cols == (cols + per_word - 1) // per_word:
++                            self.quantization_config.config_groups.group_0.weights.num_bits = bits
++                            break
++                    if getattr(self, "groupsize", None) is None:
++                        scale_cols = int(tensors[f"{base}.weight_scale"].shape[1])
++                        self.groupsize = (cols + scale_cols - 1) // scale_cols
++                    self.quantization_config.config_groups.group_0.weights.group_size = self.groupsize
+                     compressed_data = {
+                         "weight_packed": tensors[f"{base}.weight_packed"], 
+                         "weight_scale": tensors[f"{base}.weight_scale"],
+--- a/save_model.py	2026-10-22 10:39:52.414456305 +0300
++++ b/save_model.py	2026-10-22 16:05:09.987442056 +0300
+@@ -358,16 +358,20 @@
+         print(f"  {fname}")
+ 
+     groupsize = cfg.quantization.groupsize
++    wbits = cfg.quantization.gsq_bits
++    if not isinstance(wbits, int) or not (1 <= wbits <= 8):
++        wbits = 4  # mixed/ternary modes have no single packed width
+     quantized_layer_indices = sorted({
+         e["layer_idx"] for e in quantized_entries.values() if e["layer_idx"] is not None
+     })
+-    print(f"\nInjecting quantization_config into config.json (group_size={groupsize})...")
++    print(f"\nInjecting quantization_config into config.json "
++          f"(group_size={groupsize}, num_bits={wbits})...")
+     if quantized_layer_indices and len(quantized_layer_indices) < num_layers:
+         missing = sorted(set(range(num_layers)) - set(quantized_layer_indices))
+         print(f"  Partial run detected: {len(quantized_layer_indices)}/{num_layers} layers quantized; "
+               f"adding {len(missing)} unquantized layers to ignore list")
+     inject_quantization_config(
+-        out_dir, groupsize,
++        out_dir, groupsize, wbits=wbits,
+         num_layers=num_layers,
+         quantized_layer_indices=quantized_layer_indices,
+     )
+--- a/src/prior/gptq.py	2026-10-22 10:39:52.416048963 +0300
++++ b/src/prior/gptq.py	2026-10-22 16:05:09.987547664 +0300
+@@ -239,7 +239,7 @@
+             elif gsq_bits in ("ternary", "1.58", 1.58):
+                 quantizer = GumbelQuantizerTernary(torch.zeros_like(W), group_scales, groupsize, self.config.quantization.std, 0, self.device, self.dtype, logits_dtype=torch.float32)
+             elif gsq_bits in [3, 4]:
+-                quantizer = GumbelQuantizerInt(Q, group_scales, groupsize, self.config.quantization.std, self.config.quantization.strength, self.device, self.dtype, logits_dtype=torch.float32)
++                quantizer = GumbelQuantizerInt(Q, group_scales, groupsize, self.config.quantization.std, self.config.quantization.strength, self.device, self.dtype, logits_dtype=torch.float32, bits=gsq_bits)
+             else:
+                 raise ValueError(
+                     f"Unsupported gsq_bits={gsq_bits!r}. "
